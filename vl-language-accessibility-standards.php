@@ -40,6 +40,20 @@ require_once VL_LAS_PATH . 'includes/class-vl-las-language-detect.php';
 require_once VL_LAS_PATH . 'includes/class-vl-las-translate.php';
 require_once VL_LAS_PATH . 'includes/class-vl-las-soc2.php';
 
+$soc2_bootstrap = VL_LAS_PATH . 'includes/class-vl-las-soc2.php';
+if ( file_exists( $soc2_bootstrap ) ) {
+    require_once $soc2_bootstrap;
+}
+
+$soc2_endpoint_default = 'https://hub.visiblelight.ai/api/soc2/snapshot';
+if ( class_exists( 'VL_LAS_SOC2' ) ) {
+    $soc2_endpoint_default = \VL_LAS_SOC2::DEFAULT_ENDPOINT;
+}
+
+if ( ! defined( 'VL_LAS_SOC2_ENDPOINT_DEFAULT' ) ) {
+    define( 'VL_LAS_SOC2_ENDPOINT_DEFAULT', $soc2_endpoint_default );
+}
+
 /** Optional: regex audit + storage (guarded to avoid fatals on missing files) */
 $regex_engine = VL_LAS_PATH . 'includes/class-vl-las-audit-regex.php';
 $store_engine = VL_LAS_PATH . 'includes/class-vl-las-audit-store.php';
