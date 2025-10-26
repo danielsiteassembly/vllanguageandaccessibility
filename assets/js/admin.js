@@ -79,7 +79,11 @@
 
   // Guard: only run on our settings screen (the placeholders exist)
   function onSettingsPage() {
-    return !!document.getElementById("vl-las-audit-result") || !!document.getElementById("vl-las-audit-list");
+    return (
+      !!document.getElementById("vl-las-audit-result") ||
+      !!document.getElementById("vl-las-audit-list") ||
+      !!document.getElementById("vl-las-soc2-run")
+    );
   }
 
   // ---------- Pretty rendering & PDF ----------
@@ -624,6 +628,379 @@
       });
   }
 
+  // ---------- SOC 2 AUTOMATION ----------
+  function setSoc2StatusText(text, isError) {
+    var $status = $("#vl-las-soc2-status");
+    if (!$status.length) return;
+    $status.text(text || "");
+    $status.css("color", isError ? "red" : "");
+  }
+
+  function updateSoc2Raw(text) {
+    var $raw = $("#vl-las-soc2-raw");
+    if (!$raw.length) return;
+    if (!text) {
+      $raw.hide();
+      $raw.find("pre").text("");
+      return;
+    }
+    $raw.show();
+    $raw.find("pre").text(text);
+  }
+
+  function cleanText(value) {
+    if (value === null || value === undefined) return "";
+    return String(value).trim();
+  }
+
+  function cleanArray(values) {
+    if (!Array.isArray(values)) return [];
+    return values.reduce(function (acc, item) {
+      var text = cleanText(item);
+      if (text) acc.push(text);
+      return acc;
+    }, []);
+  }
+
+  function pushDetailRow(parts, label, value, joiner) {
+    var text = Array.isArray(value) ? cleanArray(value).join(joiner || ", ") : cleanText(value);
+    if (!text) return;
+    parts.push('<p><strong>' + escapeHtml(label) + ':</strong> ' + escapeHtml(text) + "</p>");
+  }
+
+  function buildListItem(label, value, joiner) {
+    var text = Array.isArray(value) ? cleanArray(value).join(joiner || ", ") : cleanText(value);
+    if (!text) return "";
+    return '<li><strong>' + escapeHtml(label) + ':</strong> ' + escapeHtml(text) + '</li>';
+  }
+
+  function buildListSection(title, items) {
+    var filtered = items.filter(function (item) { return !!item; });
+    if (!filtered.length) return "";
+    return '<h4>' + escapeHtml(title) + '</h4><ul>' + filtered.join("") + '</ul>';
+  }
+
+  function formatObservationPeriod(period) {
+    if (!period) return "";
+    var start = cleanText(period.start);
+    var end = cleanText(period.end);
+    if (start && end) {
+      return start + ' – ' + end;
+    }
+    return start || end || "";
+  }
+
+  function formatArtifactLabel(label) {
+    var text = cleanText(label).replace(/[_-]+/g, ' ');
+    text = text.replace(/\s+/g, ' ').trim();
+    if (!text) return "";
+    return text.split(' ').map(function (part) {
+      if (!part) return "";
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    }).join(' ');
+  }
+
+  function buildSoc2Header(meta, trust, period, auditors, summary) {
+    var header = [];
+    header.push('<h3 style="margin-top:0;">' + escapeHtml(cleanText(meta.type) || "SOC 2 Type II") + '</h3>');
+    var generated = meta.generated_at ? asDate(meta.generated_at) : "";
+    pushDetailRow(header, "Generated", generated);
+    pushDetailRow(header, "Trust Services Criteria", trust);
+    pushDetailRow(header, "Observation Period", formatObservationPeriod(period));
+    pushDetailRow(header, "Analysis Engine", meta.analysis_engine);
+    pushDetailRow(header, "Auditor Status", auditors.status);
+    pushDetailRow(header, "Auditor Opinion", auditors.opinion);
+    if (summary) {
+      header.push('<h4>Executive Summary</h4>');
+      header.push('<p>' + escapeHtml(cleanText(summary)) + '</p>');
+    }
+    return header.join("");
+  }
+
+  function buildSystemOverviewSection(system) {
+    var overview = [];
+    var company = system.company_overview || {};
+    var missionLine = cleanText(company.mission);
+    var structure = cleanText(company.structure);
+    if (structure) {
+      missionLine += (missionLine ? ' — ' : '') + structure;
+    }
+    overview.push(buildListItem('Mission & Structure', missionLine));
+    overview.push(buildListItem('Services', system.services_in_scope));
+    overview.push(buildListItem('Infrastructure', system.infrastructure, '; '));
+    overview.push(buildListItem('Software', system.software_components, '; '));
+    overview.push(buildListItem('Data Flows', system.data_flows, '; '));
+    overview.push(buildListItem('Personnel', system.personnel, '; '));
+    overview.push(buildListItem('Subservice Organizations', system.subservice_organizations, '; '));
+    overview.push(buildListItem('Control Boundaries', system.control_boundaries, '; '));
+    overview.push(buildListItem('BCP / DR', system.business_continuity, '; '));
+    return buildListSection('System Overview', overview);
+  }
+
+  function buildControlMatrixSection(matrix) {
+    if (!Array.isArray(matrix) || !matrix.length) return "";
+    var rows = [];
+    matrix.slice(0, 6).forEach(function (row) {
+      var domain = cleanText(row.domain || row.label);
+      var status = cleanText(row.status);
+      var tsc = Array.isArray(row.aligned_tsc) ? cleanArray(row.aligned_tsc).join(', ') : cleanText(row.aligned_tsc);
+      rows.push('<tr><td>' + escapeHtml(domain) + '</td><td>' + escapeHtml(status) + '</td><td>' + escapeHtml(tsc) + '</td></tr>');
+    });
+    if (!rows.length) return "";
+    return '<h4>Control Matrix Highlights</h4>' +
+      '<table class="widefat striped" style="margin-top:8px"><thead><tr><th>Domain</th><th>Status</th><th>Aligned TSC</th></tr></thead><tbody>' +
+      rows.join("") + '</tbody></table>';
+  }
+
+  function buildTestingSection(tests) {
+    var procedures = cleanArray(tests && tests.procedures);
+    var evidence = cleanArray(tests && tests.evidence_summary);
+    var items = [];
+    procedures.slice(0, 6).forEach(function (proc) {
+      items.push('<li>' + escapeHtml(proc) + '</li>');
+    });
+    if (evidence.length) {
+      items.push('<li><strong>Evidence:</strong> ' + escapeHtml(evidence.join('; ')) + '</li>');
+    }
+    return buildListSection('Testing & Evidence', items);
+  }
+
+  function buildRiskSection(risk) {
+    var items = [];
+    var gaps = cleanArray(risk && risk.gaps);
+    var remediation = cleanArray(risk && risk.remediation);
+    var matrix = cleanArray(risk && risk.matrix);
+    if (gaps.length) {
+      items.push('<li><strong>Gaps:</strong> ' + escapeHtml(gaps.join('; ')) + '</li>');
+    }
+    if (remediation.length) {
+      items.push('<li><strong>Remediation:</strong> ' + escapeHtml(remediation.join('; ')) + '</li>');
+    }
+    if (matrix.length) {
+      items.push('<li><strong>Risk Matrix:</strong> ' + escapeHtml(matrix.join('; ')) + '</li>');
+    }
+    return buildListSection('Risk & Remediation', items);
+  }
+
+  function buildArtifactsSection(artifacts) {
+    if (!artifacts || typeof artifacts !== 'object') return "";
+    var keys = Object.keys(artifacts);
+    if (!keys.length) return "";
+    keys.sort();
+    var items = [];
+    keys.forEach(function (key) {
+      var value = artifacts[key];
+      var label = formatArtifactLabel(key);
+      if (!label) return;
+      if (Array.isArray(value)) {
+        var joined = cleanArray(value).join('; ');
+        if (joined) {
+          items.push('<li><strong>' + escapeHtml(label) + ':</strong> ' + escapeHtml(joined) + '</li>');
+        }
+      } else {
+        var text = cleanText(value);
+        if (text) {
+          items.push('<li><strong>' + escapeHtml(label) + ':</strong> ' + escapeHtml(text) + '</li>');
+        }
+      }
+    });
+    return buildListSection('Supporting Artifacts', items);
+  }
+
+  function renderSoc2Report(report) {
+    var $host = $("#vl-las-soc2-report");
+    if (!$host.length) return;
+
+    if (!report) {
+      $host.html('<p class="description">Run the sync to generate your SOC 2 package.</p>');
+      updateSoc2Raw("");
+      window.VLLAS = window.VLLAS || {};
+      window.VLLAS.soc2Markdown = "";
+      return;
+    }
+
+    var meta = report.meta || {};
+    var trust = cleanArray(report.trust_services && report.trust_services.selected);
+    var tests = report.control_tests || {};
+    var period = tests.observation_period || {};
+    var auditors = report.auditors || {};
+    var summary = report.documents && report.documents.executive_summary ? report.documents.executive_summary : "";
+    var markdown = report.documents && report.documents.markdown ? report.documents.markdown : "";
+
+    window.VLLAS = window.VLLAS || {};
+    window.VLLAS.soc2Markdown = markdown;
+
+    var htmlParts = [];
+    htmlParts.push('<div class="vl-las-soc2-card" style="border:1px solid #ccd0d4;border-radius:6px;padding:12px;background:#fff;">');
+    htmlParts.push(buildSoc2Header(meta, trust, period, auditors, summary));
+
+    var systemSection = buildSystemOverviewSection(report.system_description || {});
+    if (systemSection) htmlParts.push(systemSection);
+
+    var matrix = report.control_environment && Array.isArray(report.control_environment.control_matrix)
+      ? report.control_environment.control_matrix
+      : [];
+    var matrixSection = buildControlMatrixSection(matrix);
+    if (matrixSection) htmlParts.push(matrixSection);
+
+    var testingSection = buildTestingSection(tests);
+    if (testingSection) htmlParts.push(testingSection);
+
+    var riskSection = buildRiskSection(report.risk_assessment || {});
+    if (riskSection) htmlParts.push(riskSection);
+
+    var artifactsSection = buildArtifactsSection(report.supporting_artifacts || {});
+    if (artifactsSection) htmlParts.push(artifactsSection);
+
+    htmlParts.push('</div>');
+    $host.html(htmlParts.join(""));
+
+    updateSoc2Raw(JSON.stringify(report, null, 2));
+  }
+
+  function setSoc2Bundle(bundle) {
+    window.VLLAS = window.VLLAS || {};
+    window.VLLAS.soc2Current = bundle || {};
+
+    var report = bundle && bundle.report ? bundle.report : null;
+    var meta = bundle && bundle.meta ? bundle.meta : {};
+    var hasReport = !!report;
+
+    $("#vl-las-soc2-download-json, #vl-las-soc2-download-markdown").prop("disabled", !hasReport);
+
+    if (hasReport) {
+      var trustList = cleanArray(Array.isArray(meta.trust_services) ? meta.trust_services : []);
+      var trustText = trustList.length ? trustList.join(", ") : "baseline criteria";
+      var generated = meta.generated_at ? asDate(meta.generated_at) : "";
+      setSoc2StatusText("Last generated on " + generated + " covering " + trustText + ".", false);
+    } else {
+      if (bundle && bundle.enabled === false) {
+        setSoc2StatusText("SOC 2 automation is disabled. Enable it above to run a sync.", false);
+      } else {
+        setSoc2StatusText("No SOC 2 report generated yet.", false);
+      }
+    }
+
+    renderSoc2Report(report);
+  }
+
+  function fetchSoc2Report(cb) {
+    var btn = document.getElementById("vl-las-soc2-run");
+    if (!btn) {
+      cb && cb(false);
+      return;
+    }
+
+    var restRoot = btn.getAttribute("data-rest-root") || getRestRoot();
+    var nonce = btn.getAttribute("data-nonce") || getNonce();
+    if (!restRoot || !nonce) {
+      cb && cb(false);
+      return;
+    }
+
+    var url = withNonce(joinUrl(restRoot, "soc2/report"), nonce);
+
+    $.ajax({
+      method: "GET",
+      url: url,
+      timeout: 30000,
+      beforeSend: function (xhr) {
+        xhr.setRequestHeader("X-WP-Nonce", nonce);
+      },
+    })
+      .done(function (resp) {
+        if (resp && resp.ok && resp.report) {
+          setSoc2Bundle(resp);
+          cb && cb(true, resp);
+        } else {
+          cb && cb(false, resp);
+        }
+      })
+      .fail(function (xhr) {
+        cb && cb(false, xhr);
+      });
+  }
+
+  function bootstrapSoc2() {
+    if (!document.getElementById("vl-las-soc2-run")) return;
+
+    if (window.VLLAS && window.VLLAS.soc2Initial) {
+      setSoc2Bundle(window.VLLAS.soc2Initial);
+    } else {
+      setSoc2Bundle({});
+    }
+
+    fetchSoc2Report();
+  }
+
+  $(document).on("click", "#vl-las-soc2-run", function (e) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    var btn = this;
+    var restRoot = btn.getAttribute("data-rest-root") || getRestRoot();
+    var nonce = btn.getAttribute("data-nonce") || getNonce();
+    if (!restRoot || !nonce) {
+      setSoc2StatusText("REST not initialized for SOC 2 automation.", true);
+      return;
+    }
+
+    setSoc2StatusText("Syncing with VL Hub…", false);
+    btn.disabled = true;
+
+    var url = withNonce(joinUrl(restRoot, "soc2/run"), nonce);
+
+    $.ajax({
+      method: "POST",
+      url: url,
+      timeout: 60000,
+      contentType: "application/json; charset=utf-8",
+      data: JSON.stringify({}),
+      beforeSend: function (xhr) {
+        xhr.setRequestHeader("X-WP-Nonce", nonce);
+        xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
+      },
+    })
+      .done(function (resp) {
+        if (resp && resp.ok && resp.report) {
+          setSoc2Bundle(resp);
+          setSoc2StatusText("SOC 2 report generated successfully.", false);
+        } else {
+          var err = resp && (resp.error || resp.message) ? resp.error || resp.message : "Unexpected response";
+          setSoc2StatusText("SOC 2 sync failed: " + err, true);
+        }
+      })
+      .fail(function (xhr) {
+        var msg = "SOC 2 sync failed";
+        if (xhr && xhr.responseJSON && (xhr.responseJSON.error || xhr.responseJSON.message)) {
+          msg += ": " + (xhr.responseJSON.error || xhr.responseJSON.message);
+        }
+        setSoc2StatusText(msg + " (HTTP " + xhr.status + ")", true);
+      })
+      .always(function () {
+        btn.disabled = false;
+      });
+  });
+
+  $(document).on("click", "#vl-las-soc2-download-json", function (e) {
+    e.preventDefault();
+    var bundle = window.VLLAS && window.VLLAS.soc2Current;
+    var report = bundle && bundle.report ? bundle.report : null;
+    if (!report) return;
+    var name = "vl-las-soc2-report.json";
+    downloadBlob(JSON.stringify(report, null, 2), name);
+  });
+
+  $(document).on("click", "#vl-las-soc2-download-markdown", function (e) {
+    e.preventDefault();
+    var md = window.VLLAS && window.VLLAS.soc2Markdown;
+    if (!md) {
+      alert("Markdown package not available yet. Run the sync first.");
+      return;
+    }
+    downloadBlob(md, "vl-las-soc2-report.md");
+  });
+
   // ---------- boot ----------
   $(function () {
     if (onSettingsPage()) {
@@ -634,6 +1011,8 @@
       if ($("#vl-las-audit-list").length) {
         loadReports();
       }
+
+      bootstrapSoc2();
     }
   });
 })(jQuery);

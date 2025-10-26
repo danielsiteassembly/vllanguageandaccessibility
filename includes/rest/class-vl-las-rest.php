@@ -149,31 +149,45 @@ class VL_LAS_REST {
 		) );
 
 		// --- POST /audit — compatibility alias to /audit2
-		register_rest_route( self::ns(), '/audit', array(
-			'methods'             => \WP_REST_Server::CREATABLE,
-			'permission_callback' => function () { return self::can_admin(); },
-			'args'                => array(
-				'url'  => array( 'required' => false, 'type' => 'string' ),
-				'html' => array( 'required' => false, 'type' => 'string' ),
-			),
-			'callback'            => array( __CLASS__, 'handle_audit_post' ),
-		) );
+                register_rest_route( self::ns(), '/audit', array(
+                        'methods'             => \WP_REST_Server::CREATABLE,
+                        'permission_callback' => function () { return self::can_admin(); },
+                        'args'                => array(
+                                'url'  => array( 'required' => false, 'type' => 'string' ),
+                                'html' => array( 'required' => false, 'type' => 'string' ),
+                        ),
+                        'callback'            => array( __CLASS__, 'handle_audit_post' ),
+                ) );
 
-		// --- POST /gemini-test — test Gemini API key
-		register_rest_route( self::ns(), '/gemini-test', array(
-			'methods'             => \WP_REST_Server::CREATABLE,
-			'permission_callback' => function () { return self::can_admin(); },
-			'callback'            => array( __CLASS__, 'handle_gemini_test' ),
-		) );
-	}
+                // --- POST /gemini-test — test Gemini API key
+                register_rest_route( self::ns(), '/gemini-test', array(
+                        'methods'             => \WP_REST_Server::CREATABLE,
+                        'permission_callback' => function () { return self::can_admin(); },
+                        'callback'            => array( __CLASS__, 'handle_gemini_test' ),
+                ) );
 
-	/**
-	 * Handle POST /audit2 (and /audit).
-	 * Uses VL_LAS_Audit_Regex if present; does not autoload heavy classes.
-	 */
-	public static function handle_audit_post( \WP_REST_Request $req ) {
-		try {
-			$html = (string) $req->get_param( 'html' );
+                // --- GET /soc2/report — latest SOC 2 bundle
+                register_rest_route( self::ns(), '/soc2/report', array(
+                        'methods'             => \WP_REST_Server::READABLE,
+                        'permission_callback' => function () { return self::can_admin(); },
+                        'callback'            => array( __CLASS__, 'handle_soc2_get' ),
+                ) );
+
+                // --- POST /soc2/run — trigger full sync
+                register_rest_route( self::ns(), '/soc2/run', array(
+                        'methods'             => \WP_REST_Server::CREATABLE,
+                        'permission_callback' => function () { return self::can_admin(); },
+                        'callback'            => array( __CLASS__, 'handle_soc2_run' ),
+                ) );
+        }
+
+        /**
+         * Handle POST /audit2 (and /audit).
+         * Uses VL_LAS_Audit_Regex if present; does not autoload heavy classes.
+         */
+        public static function handle_audit_post( \WP_REST_Request $req ) {
+                try {
+                        $html = (string) $req->get_param( 'html' );
 			$url  = (string) $req->get_param( 'url' );
 			$url  = $url ? esc_url_raw( $url ) : home_url( '/' );
 
@@ -183,7 +197,7 @@ class VL_LAS_REST {
 					'ok'    => false,
 					'error' => 'Regex audit engine not loaded. Ensure class-vl-las-audit-regex.php is required by the main plugin file.',
 				) );
-			}
+				}
 
 			// Run audit (safe regex).
 			if ( method_exists( '\VL_LAS_Audit_Regex', 'run' ) ) {
@@ -232,13 +246,82 @@ class VL_LAS_REST {
 				error_log( '[VL_LAS] audit2 fatal: ' . $t->getMessage() . "\n" . $t->getTraceAsString() );
 			}
 			return new \WP_Error( 'vl_las_internal', 'Audit crashed: ' . $t->getMessage(), array( 'status' => 500 ) );
-		}
-	}
+                }
+        }
 
-	/**
-	 * Handle POST /gemini-test.
-	 * Test the Gemini API key by making a real request to the Gemini API.
-	 */
+        /**
+         * Handle GET /soc2/report.
+         */
+        public static function handle_soc2_get( \WP_REST_Request $req ) {
+                if ( ! self::can_admin() ) {
+                        return new \WP_Error(
+                                'rest_forbidden',
+                                __( 'Sorry, you are not allowed to access SOC 2 reports.', 'vl-las' ),
+                                array( 'status' => rest_authorization_required_code() )
+                        );
+                }
+
+                if ( ! class_exists( '\\VL_LAS_SOC2' ) ) {
+                        return rest_ensure_response( array(
+                                'ok'    => false,
+                                'error' => __( 'SOC 2 module unavailable.', 'vl-las' ),
+                        ) );
+                }
+
+                $enabled = (bool) get_option( 'vl_las_soc2_enabled', 0 );
+                $bundle  = \VL_LAS_SOC2::get_cached_bundle();
+
+                return rest_ensure_response( array(
+                        'ok'       => true,
+                        'enabled'  => $enabled,
+                        'report'   => $bundle['report'],
+                        'snapshot' => $bundle['snapshot'],
+                        'meta'     => $bundle['meta'],
+                ) );
+        }
+
+        /**
+         * Handle POST /soc2/run.
+         */
+        public static function handle_soc2_run( \WP_REST_Request $req ) {
+                if ( ! self::can_admin() ) {
+                        return new \WP_Error(
+                                'rest_forbidden',
+                                __( 'Sorry, you are not allowed to access SOC 2 reports.', 'vl-las' ),
+                                array( 'status' => rest_authorization_required_code() )
+                        );
+                }
+
+                if ( ! class_exists( '\\VL_LAS_SOC2' ) ) {
+                        return rest_ensure_response( array(
+                                'ok'    => false,
+                                'error' => __( 'SOC 2 module unavailable.', 'vl-las' ),
+                        ) );
+                }
+
+                if ( ! get_option( 'vl_las_soc2_enabled', 0 ) ) {
+                        return rest_ensure_response( array(
+                                'ok'    => false,
+                                'error' => __( 'Enable SOC 2 automation in settings before running a sync.', 'vl-las' ),
+                        ) );
+                }
+
+                try {
+                        $result = \VL_LAS_SOC2::run_full_report();
+                        $result['enabled'] = true;
+                        return rest_ensure_response( array_merge( array( 'ok' => true ), $result ) );
+                } catch ( \Throwable $t ) {
+                        return rest_ensure_response( array(
+                                'ok'    => false,
+                                'error' => sanitize_text_field( $t->getMessage() ),
+                        ) );
+                }
+        }
+
+        /**
+         * Handle POST /gemini-test.
+         * Test the Gemini API key by making a real request to the Gemini API.
+         */
 	public static function handle_gemini_test( \WP_REST_Request $req ) {
 		try {
 			$key = trim( (string) get_option( 'vl_las_gemini_api_key', '' ) );
