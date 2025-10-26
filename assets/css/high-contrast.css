@@ -1,0 +1,5 @@
+/* Native high-contrast override */
+:root { --vl-las-bg:#000; --vl-las-fg:#fff; --vl-las-link:#0ff; }
+body.vl-las-contrast, body .vl-las-contrast { background: var(--vl-las-bg) !important; color: var(--vl-las-fg) !important; }
+body.vl-las-contrast a { color: var(--vl-las-link); text-decoration: underline; }
+button, input, select, textarea { border: 2px solid var(--vl-las-fg) !important; background:#111 !important; color: var(--vl-las-fg) !important; }

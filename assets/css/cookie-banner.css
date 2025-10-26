@@ -1,0 +1,10 @@
+#vl-las-cookie-banner{position:fixed;z-index:99999;max-width:min(420px,calc(100vw - 32px));width:auto;box-sizing:border-box;font-size:14px;line-height:1.4;}
+#vl-las-cookie-banner.bottom-right{right:16px;bottom:16px;}
+#vl-las-cookie-banner.bottom-left{left:16px;bottom:16px;}
+#vl-las-cookie-banner .vl-las-cookie__content{background:#111;color:#fff;padding:14px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.3);}
+#vl-las-cookie-banner .vl-las-cookie__actions{display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap}
+#vl-las-cookie-banner .vl-las-btn{border:0;border-radius:6px;padding:8px 12px;cursor:pointer}
+#vl-las-cookie-banner .vl-las-btn.accept{background:#2e7d32;color:#fff}
+#vl-las-cookie-banner .vl-las-btn.reject{background:#c62828;color:#fff}
+#vl-las-cookie-banner .vl-las-link{color:#90caf9;text-decoration:underline}
+#vl-las-cookie-banner.hidden{display:none}
