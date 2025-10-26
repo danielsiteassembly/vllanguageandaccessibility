@@ -458,7 +458,6 @@ public function print_fallback_loader() {
             <p><strong><?php esc_html_e( 'Enterprise SOC 2 automation overview', 'vl-las' ); ?></strong></p>
             <ul style="margin-left:20px; list-style:disc;">
                 <li><?php esc_html_e( 'Ensure your Corporate License Code is saved so the plugin can authenticate with the VL Hub.', 'vl-las' ); ?></li>
-                <li><?php esc_html_e( 'Request your tenant-specific SOC 2 snapshot endpoint from Visible Light (base path: https://hub.visiblelight.ai/api/soc2/snapshot).', 'vl-las' ); ?></li>
                 <li><?php esc_html_e( 'Click “Sync & Generate SOC 2 Report” to pull the latest controls, evidence, and risk data into WordPress.', 'vl-las' ); ?></li>
                 <li><?php esc_html_e( 'Download the JSON or Markdown package to hand off to executive stakeholders, auditors, or investors.', 'vl-las' ); ?></li>
             </ul>
@@ -794,10 +793,8 @@ public function print_fallback_loader() {
             'vl_las_soc2_endpoint',
             array(
                 'type'              => 'string',
-                'sanitize_callback' => array( $this, 'sanitize_soc2_endpoint' ),
-                'default'           => defined( 'VL_LAS_SOC2_ENDPOINT_DEFAULT' )
-                    ? VL_LAS_SOC2_ENDPOINT_DEFAULT
-                    : 'https://hub.visiblelight.ai/api/soc2/snapshot',
+                'sanitize_callback' => 'esc_url_raw',
+                'default'           => 'https://hub.visiblelight.ai/api/soc2/snapshot',
             )
         );
 
@@ -816,9 +813,13 @@ public function print_fallback_loader() {
         add_settings_field(
             'vl_las_soc2_endpoint',
             __( 'VL Hub SOC 2 Endpoint', 'vl-las' ),
-            array( $this, 'soc2_endpoint_field' ),
+            array( $this, 'text_field' ),
             'vl-las',
-            'vl_las_soc2'
+            'vl_las_soc2',
+            array(
+                'key'         => 'soc2_endpoint',
+                'placeholder' => 'https://hub.visiblelight.ai/api/soc2/snapshot',
+            )
         );
 
         add_settings_field(
@@ -1181,26 +1182,20 @@ public function print_fallback_loader() {
         }
 
         $has_report   = ! empty( $report );
-        $is_enabled   = ! empty( $bundle['enabled'] );
         $trust_summary = $trusts ? implode( ', ', $trusts ) : __( 'baseline criteria', 'vl-las' );
-        if ( $has_report ) {
-            $status_text = sprintf(
+        $status_text   = $has_report
+            ? sprintf(
                 /* translators: 1: generated time, 2: trust services criteria list */
                 __( 'Last generated on %1$s covering %2$s.', 'vl-las' ),
                 $last_generated,
                 $trust_summary
-            );
-        } elseif ( ! $is_enabled ) {
-            $status_text = __( 'SOC 2 automation is disabled. Enable it above and click “Save Changes” before running a sync.', 'vl-las' );
-        } else {
-            $status_text = __( 'No SOC 2 report generated yet.', 'vl-las' );
-        }
+            )
+            : __( 'No SOC 2 report generated yet.', 'vl-las' );
 
         echo '<p class="description">' . esc_html__( 'Runs a full SOC 2 Type II sync from the VL Hub and prepares an executive-ready package.', 'vl-las' ) . '</p>';
 
         echo '<p>';
-        $button_disabled = $is_enabled ? '' : ' disabled="disabled" aria-disabled="true"';
-        echo '<button type="button" class="button button-primary" id="vl-las-soc2-run"' . $button_disabled;
+        echo '<button type="button" class="button button-primary" id="vl-las-soc2-run"';
         echo ' data-rest-root="' . esc_attr( $rest_root ) . '"';
         echo ' data-rest-path="soc2/run"';
         echo ' data-nonce="' . esc_attr( $nonce ) . '">';

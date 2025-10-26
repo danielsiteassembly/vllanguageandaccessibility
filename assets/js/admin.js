@@ -662,17 +662,6 @@
     }, []);
   }
 
-  function hasReportData(report) {
-    if (!report) return false;
-    if (Array.isArray(report)) {
-      return report.length > 0;
-    }
-    if (typeof report === "object") {
-      return Object.keys(report).length > 0;
-    }
-    return !!report;
-  }
-
   function pushDetailRow(parts, label, value, joiner) {
     var text = Array.isArray(value) ? cleanArray(value).join(joiner || ", ") : cleanText(value);
     if (!text) return;
@@ -822,9 +811,7 @@
     var $host = $("#vl-las-soc2-report");
     if (!$host.length) return;
 
-    var emptyObject = report && typeof report === "object" && !Array.isArray(report) && Object.keys(report).length === 0;
-
-    if (!report || emptyObject) {
+    if (!report) {
       $host.html('<p class="description">Run the sync to generate your SOC 2 package.</p>');
       updateSoc2Raw("");
       window.VLLAS = window.VLLAS || {};
@@ -877,39 +864,21 @@
 
     var report = bundle && bundle.report ? bundle.report : null;
     var meta = bundle && bundle.meta ? bundle.meta : {};
-    var enabledFlag = null;
-    if (bundle && typeof bundle.enabled !== "undefined") {
-      enabledFlag = !!bundle.enabled;
-    }
-    var hasReport = hasReportData(report);
-
-    var runBtn = document.getElementById("vl-las-soc2-run");
-    if (runBtn) {
-      if (enabledFlag === false) {
-        runBtn.disabled = true;
-        runBtn.setAttribute("aria-disabled", "true");
-        runBtn.classList.add("disabled");
-      } else {
-        runBtn.disabled = false;
-        runBtn.removeAttribute("aria-disabled");
-        runBtn.classList.remove("disabled");
-      }
-    }
+    var hasReport = !!report;
 
     $("#vl-las-soc2-download-json, #vl-las-soc2-download-markdown").prop("disabled", !hasReport);
 
-    if (enabledFlag === false) {
-      setSoc2StatusText(
-        "SOC 2 automation is disabled. Enable it above and click \"Save Changes\" before running a sync.",
-        false
-      );
-    } else if (hasReport) {
+    if (hasReport) {
       var trustList = cleanArray(Array.isArray(meta.trust_services) ? meta.trust_services : []);
       var trustText = trustList.length ? trustList.join(", ") : "baseline criteria";
       var generated = meta.generated_at ? asDate(meta.generated_at) : "";
       setSoc2StatusText("Last generated on " + generated + " covering " + trustText + ".", false);
     } else {
-      setSoc2StatusText("No SOC 2 report generated yet.", false);
+      if (bundle && bundle.enabled === false) {
+        setSoc2StatusText("SOC 2 automation is disabled. Enable it above to run a sync.", false);
+      } else {
+        setSoc2StatusText("No SOC 2 report generated yet.", false);
+      }
     }
 
     renderSoc2Report(report);
@@ -940,26 +909,14 @@
       },
     })
       .done(function (resp) {
-        if (resp && resp.ok) {
+        if (resp && resp.ok && resp.report) {
           setSoc2Bundle(resp);
           cb && cb(true, resp);
         } else {
-          if (resp && (resp.error || resp.message)) {
-            setSoc2StatusText(resp.error || resp.message, true);
-          }
           cb && cb(false, resp);
         }
       })
       .fail(function (xhr) {
-        var status = xhr && typeof xhr.status !== "undefined" ? xhr.status : 0;
-        var message = "Unable to reach the SOC 2 endpoint.";
-        if (xhr && xhr.responseJSON && (xhr.responseJSON.error || xhr.responseJSON.message)) {
-          message += " " + (xhr.responseJSON.error || xhr.responseJSON.message);
-        }
-        if (status) {
-          message += " (HTTP " + status + ")";
-        }
-        setSoc2StatusText(message, true);
         cb && cb(false, xhr);
       });
   }
@@ -1042,32 +999,6 @@
       return;
     }
     downloadBlob(md, "vl-las-soc2-report.md");
-  });
-
-  $(document).on("change", 'input[name="vl_las_soc2_enabled"]', function () {
-    var btn = document.getElementById("vl-las-soc2-run");
-    if (!btn) return;
-
-    var bundle = window.VLLAS && window.VLLAS.soc2Current;
-    var report = bundle && bundle.report ? bundle.report : null;
-    var hasReport = hasReportData(report);
-
-    if (this.checked) {
-      btn.disabled = false;
-      btn.removeAttribute("aria-disabled");
-      btn.classList.remove("disabled");
-      if (!hasReport) {
-        setSoc2StatusText("Save changes, then run a sync to pull the latest SOC 2 package.", false);
-      }
-    } else {
-      btn.disabled = true;
-      btn.setAttribute("aria-disabled", "true");
-      btn.classList.add("disabled");
-      setSoc2StatusText(
-        "SOC 2 automation is disabled. Enable it above and click \"Save Changes\" before running a sync.",
-        false
-      );
-    }
   });
 
   // ---------- boot ----------
