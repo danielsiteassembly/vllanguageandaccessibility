@@ -39,6 +39,20 @@ require_once VL_LAS_PATH . 'includes/class-vl-las-languages.php';
 require_once VL_LAS_PATH . 'includes/class-vl-las-language-detect.php';
 require_once VL_LAS_PATH . 'includes/class-vl-las-translate.php';
 
+$soc2_bootstrap = VL_LAS_PATH . 'includes/class-vl-las-soc2.php';
+if ( file_exists( $soc2_bootstrap ) ) {
+    require_once $soc2_bootstrap;
+}
+
+$soc2_endpoint_default = 'https://hub.visiblelight.ai/api/soc2/snapshot';
+if ( class_exists( 'VL_LAS_SOC2' ) ) {
+    $soc2_endpoint_default = \VL_LAS_SOC2::DEFAULT_ENDPOINT;
+}
+
+if ( ! defined( 'VL_LAS_SOC2_ENDPOINT_DEFAULT' ) ) {
+    define( 'VL_LAS_SOC2_ENDPOINT_DEFAULT', $soc2_endpoint_default );
+}
+
 /** Optional: regex audit + storage (guarded to avoid fatals on missing files) */
 $regex_engine = VL_LAS_PATH . 'includes/class-vl-las-audit-regex.php';
 $store_engine = VL_LAS_PATH . 'includes/class-vl-las-audit-store.php';
@@ -66,6 +80,8 @@ function vl_las_activate() {
         // Audit defaults
         'audit_engine'           => 2, // 0 off, 1 diagnostics, 2 regex-only
         'audit_show_json'        => 0,
+        'soc2_enabled'           => 0,
+        'soc2_endpoint'          => VL_LAS_SOC2_ENDPOINT_DEFAULT,
     );
     foreach ( $defaults as $key => $val ) {
         if ( get_option( 'vl_las_' . $key, null ) === null ) {

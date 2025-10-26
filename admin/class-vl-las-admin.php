@@ -450,6 +450,23 @@ public function print_fallback_loader() {
     }
 
     /**
+     * Help/usage content for SOC 2 automation.
+     */
+    public function soc2_help() {
+        ?>
+        <div class="notice notice-info" style="margin:10px 0;">
+            <p><strong><?php esc_html_e( 'Enterprise SOC 2 automation overview', 'vl-las' ); ?></strong></p>
+            <ul style="margin-left:20px; list-style:disc;">
+                <li><?php esc_html_e( 'Ensure your Corporate License Code is saved so the plugin can authenticate with the VL Hub.', 'vl-las' ); ?></li>
+                <li><?php esc_html_e( 'Request your tenant-specific SOC 2 snapshot endpoint from Visible Light (base path: https://hub.visiblelight.ai/api/soc2/snapshot).', 'vl-las' ); ?></li>
+                <li><?php esc_html_e( 'Click “Sync & Generate SOC 2 Report” to pull the latest controls, evidence, and risk data into WordPress.', 'vl-las' ); ?></li>
+                <li><?php esc_html_e( 'Download the JSON or Markdown package to hand off to executive stakeholders, auditors, or investors.', 'vl-las' ); ?></li>
+            </ul>
+        </div>
+        <?php
+    }
+
+    /**
      * Register settings, sections, and fields.
      */
     public function register_settings() {
@@ -460,6 +477,7 @@ public function print_fallback_loader() {
         add_settings_section( 'vl_las_accessibility', __( 'Accessibility', 'vl-las' ),  null, 'vl-las' );
         add_settings_section( 'vl_las_security',      __( 'Security & License', 'vl-las' ), null, 'vl-las' );
         add_settings_section( 'vl_las_audit',         __( 'Audit (WCAG 2.1 AA)', 'vl-las' ), null, 'vl-las' );
+        add_settings_section( 'vl_las_soc2',          __( 'SOC 2 Type II Automation', 'vl-las' ), array( $this, 'soc2_help' ), 'vl-las' );
 
         /**
          * Languages: list + Gemini 2.5 + detection + translate toggles
@@ -766,6 +784,50 @@ public function print_fallback_loader() {
             'vl-las',
             'vl_las_audit'
         );
+
+        /**
+         * SOC 2 automation
+         */
+        register_setting( 'vl-las', 'vl_las_soc2_enabled', array( $this, 'sanitize_int' ) );
+        register_setting(
+            'vl-las',
+            'vl_las_soc2_endpoint',
+            array(
+                'type'              => 'string',
+                'sanitize_callback' => array( $this, 'sanitize_soc2_endpoint' ),
+                'default'           => defined( 'VL_LAS_SOC2_ENDPOINT_DEFAULT' )
+                    ? VL_LAS_SOC2_ENDPOINT_DEFAULT
+                    : 'https://hub.visiblelight.ai/api/soc2/snapshot',
+            )
+        );
+
+        add_settings_field(
+            'vl_las_soc2_enabled',
+            __( 'Enable SOC 2 Automation', 'vl-las' ),
+            array( $this, 'checkbox_field' ),
+            'vl-las',
+            'vl_las_soc2',
+            array(
+                'key'   => 'soc2_enabled',
+                'label' => __( 'Allow the plugin to sync SOC 2 evidence from the VL Hub', 'vl-las' ),
+            )
+        );
+
+        add_settings_field(
+            'vl_las_soc2_endpoint',
+            __( 'VL Hub SOC 2 Endpoint', 'vl-las' ),
+            array( $this, 'soc2_endpoint_field' ),
+            'vl-las',
+            'vl_las_soc2'
+        );
+
+        add_settings_field(
+            'vl_las_soc2_runner',
+            __( 'Enterprise Report Generator', 'vl-las' ),
+            array( $this, 'soc2_run_field' ),
+            'vl-las',
+            'vl_las_soc2'
+        );
     }
 
     // ----------------------------
@@ -791,6 +853,127 @@ public function print_fallback_loader() {
         $v = is_numeric( $val ) ? (int) $val : 0;
         // Allowed: 0 = Off, 1 = Diagnostics, 2 = Regex-only
         return in_array( $v, array( 0, 1, 2 ), true ) ? $v : 2;
+    }
+
+    public function sanitize_soc2_endpoint( $val ) {
+        $raw_value = trim( (string) $val );
+        $default   = defined( 'VL_LAS_SOC2_ENDPOINT_DEFAULT' )
+            ? VL_LAS_SOC2_ENDPOINT_DEFAULT
+            : 'https://hub.visiblelight.ai/api/soc2/snapshot';
+        $previous  = get_option( 'vl_las_soc2_endpoint', $default );
+
+        if ( '' === $raw_value ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_empty',
+                __( 'Provide the SOC 2 snapshot endpoint assigned to your organization by Visible Light.', 'vl-las' )
+            );
+            return $previous;
+        }
+
+        $url = esc_url_raw( $raw_value );
+        if ( '' === $url ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_invalid',
+                __( 'Enter a valid HTTPS URL for the VL Hub SOC 2 endpoint.', 'vl-las' )
+            );
+            return $previous;
+        }
+
+        $parts = wp_parse_url( $url );
+        if ( ! $parts || empty( $parts['scheme'] ) || empty( $parts['host'] ) ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_parts',
+                __( 'The SOC 2 endpoint must include a hostname and path.', 'vl-las' )
+            );
+            return $previous;
+        }
+
+        if ( 'https' !== strtolower( $parts['scheme'] ) ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_scheme',
+                __( 'The SOC 2 endpoint must use HTTPS.', 'vl-las' )
+            );
+            return $previous;
+        }
+
+        if ( empty( $parts['path'] ) || false === strpos( $parts['path'], '/soc2' ) ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_path',
+                __( 'The SOC 2 endpoint should point to the /api/soc2/snapshot service provided by Visible Light.', 'vl-las' )
+            );
+            return $previous;
+        }
+
+        $headers = array( 'Accept' => 'application/json' );
+        $license = trim( (string) get_option( 'vl_las_license_code', '' ) );
+        if ( '' !== $license ) {
+            $headers['X-VL-License'] = $license;
+        }
+
+        $response = wp_remote_get( $url, array(
+            'timeout'     => 10,
+            'redirection' => 3,
+            'headers'     => $headers,
+        ) );
+
+        if ( is_wp_error( $response ) ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_unreachable',
+                sprintf(
+                    /* translators: %s: WordPress HTTP error message. */
+                    __( 'Could not connect to the VL Hub endpoint: %s', 'vl-las' ),
+                    $response->get_error_message()
+                )
+            );
+            return $previous;
+        }
+
+        $code       = (int) wp_remote_retrieve_response_code( $response );
+        $valid_codes = apply_filters(
+            'vl_las_soc2_endpoint_valid_codes',
+            array( 200, 201, 202, 203, 204, 206, 401, 403 )
+        );
+
+        if ( ! in_array( $code, $valid_codes, true ) ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_http',
+                sprintf(
+                    /* translators: %d: HTTP status code */
+                    __( 'Unexpected response from the VL Hub endpoint (HTTP %d).', 'vl-las' ),
+                    $code
+                )
+            );
+            return $previous;
+        }
+
+        if ( $code >= 400 ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_auth',
+                sprintf(
+                    /* translators: %d: HTTP status code */
+                    __( 'Endpoint reachable (HTTP %d). Confirm your Corporate License Code with Visible Light.', 'vl-las' ),
+                    $code
+                ),
+                'updated'
+            );
+        } else {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_ok',
+                __( 'Connection to the VL Hub SOC 2 endpoint succeeded.', 'vl-las' ),
+                'updated'
+            );
+        }
+
+        return $url;
     }
 
     // ----------------------------
@@ -831,6 +1014,32 @@ public function print_fallback_loader() {
             esc_attr( $val ),
             isset( $args['placeholder'] ) ? esc_attr( $args['placeholder'] ) : ''
         );
+    }
+
+    public function soc2_endpoint_field() {
+        $default = defined( 'VL_LAS_SOC2_ENDPOINT_DEFAULT' )
+            ? VL_LAS_SOC2_ENDPOINT_DEFAULT
+            : 'https://hub.visiblelight.ai/api/soc2/snapshot';
+        $value = get_option( 'vl_las_soc2_endpoint', $default );
+
+        printf(
+            '<input type="url" name="vl_las_soc2_endpoint" value="%1$s" class="regular-text code" placeholder="%2$s" pattern="https://.*" />',
+            esc_attr( $value ),
+            esc_attr( $default )
+        );
+
+        echo '<p class="description">' . esc_html__( 'Provide the tenant-specific SOC 2 snapshot URL issued by Visible Light. The plugin expects a secure endpoint hosted on the VL Hub.', 'vl-las' ) . '</p>';
+        printf(
+            '<p class="description">%s</p>',
+            wp_kses_post(
+                sprintf(
+                    /* translators: %s: example SOC 2 endpoint URL */
+                    __( 'Example endpoint: %s (replace the tenant token with the value Visible Light provides).', 'vl-las' ),
+                    '<code>https://hub.visiblelight.ai/api/soc2/snapshot?tenant=your-company-slug</code>'
+                )
+            )
+        );
+        echo '<p class="description">' . esc_html__( 'Saving this field pings the VL Hub immediately to validate the connection.', 'vl-las' ) . '</p>';
     }
 
     public function textarea_field( $args ) {
@@ -949,6 +1158,75 @@ public function print_fallback_loader() {
         })();
         </script>
         <?php
+    }
+
+    /**
+     * Render the SOC 2 automation controls.
+     */
+    public function soc2_run_field() {
+        $rest_root = esc_url_raw( rest_url( 'vl-las/v1' ) );
+        $nonce     = wp_create_nonce( 'wp_rest' );
+
+        $bundle = class_exists( 'VL_LAS_SOC2' ) ? \VL_LAS_SOC2::get_cached_bundle() : array();
+        $bundle['enabled'] = (bool) get_option( 'vl_las_soc2_enabled', 0 );
+        $meta   = isset( $bundle['meta'] ) && is_array( $bundle['meta'] ) ? $bundle['meta'] : array();
+        $report = isset( $bundle['report'] ) && is_array( $bundle['report'] ) ? $bundle['report'] : array();
+
+        $last_generated = isset( $meta['generated_at'] ) ? sanitize_text_field( $meta['generated_at'] ) : '';
+        $trusts         = array();
+        if ( ! empty( $meta['trust_services'] ) && is_array( $meta['trust_services'] ) ) {
+            foreach ( $meta['trust_services'] as $tsc ) {
+                $trusts[] = sanitize_text_field( $tsc );
+            }
+        }
+
+        $has_report   = ! empty( $report );
+        $is_enabled   = ! empty( $bundle['enabled'] );
+        $trust_summary = $trusts ? implode( ', ', $trusts ) : __( 'baseline criteria', 'vl-las' );
+        if ( $has_report ) {
+            $status_text = sprintf(
+                /* translators: 1: generated time, 2: trust services criteria list */
+                __( 'Last generated on %1$s covering %2$s.', 'vl-las' ),
+                $last_generated,
+                $trust_summary
+            );
+        } elseif ( ! $is_enabled ) {
+            $status_text = __( 'SOC 2 automation is disabled. Enable it above and click “Save Changes” before running a sync.', 'vl-las' );
+        } else {
+            $status_text = __( 'No SOC 2 report generated yet.', 'vl-las' );
+        }
+
+        echo '<p class="description">' . esc_html__( 'Runs a full SOC 2 Type II sync from the VL Hub and prepares an executive-ready package.', 'vl-las' ) . '</p>';
+
+        echo '<p>';
+        $button_disabled = $is_enabled ? '' : ' disabled="disabled" aria-disabled="true"';
+        echo '<button type="button" class="button button-primary" id="vl-las-soc2-run"' . $button_disabled;
+        echo ' data-rest-root="' . esc_attr( $rest_root ) . '"';
+        echo ' data-rest-path="soc2/run"';
+        echo ' data-nonce="' . esc_attr( $nonce ) . '">';
+        echo esc_html__( 'Sync & Generate SOC 2 Report', 'vl-las' );
+        echo '</button> ';
+
+        $disabled = $has_report ? '' : ' disabled="disabled"';
+        echo '<button type="button" class="button" id="vl-las-soc2-download-json"' . $disabled . '>' . esc_html__( 'Download JSON', 'vl-las' ) . '</button> ';
+        echo '<button type="button" class="button" id="vl-las-soc2-download-markdown"' . $disabled . '>' . esc_html__( 'Download Markdown', 'vl-las' ) . '</button>';
+        echo '</p>';
+
+        echo '<div id="vl-las-soc2-status" style="margin-top:8px;">' . esc_html( $status_text ) . '</div>';
+        echo '<div id="vl-las-soc2-report" class="vl-las-soc2-report" style="margin-top:12px;"></div>';
+        echo '<details id="vl-las-soc2-raw" style="margin-top:12px; display:none;">'
+            . '<summary>' . esc_html__( 'Show raw SOC 2 JSON', 'vl-las' ) . '</summary>'
+            . '<pre style="max-height:340px; overflow:auto;"></pre>'
+            . '</details>';
+
+        echo '<script>window.VLLAS = window.VLLAS || {}; window.VLLAS.soc2Initial = ' . wp_json_encode( $bundle ) . ';</script>';
+
+        if ( $has_report ) {
+            $raw_json = wp_json_encode( $report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES );
+            echo '<script>window.VLLAS.soc2InitialRaw = ' . wp_json_encode( $raw_json ) . ';</script>';
+        } else {
+            echo '<script>window.VLLAS.soc2InitialRaw = null;</script>';
+        }
     }
 
     /**
