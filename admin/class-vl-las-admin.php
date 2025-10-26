@@ -856,6 +856,127 @@ public function print_fallback_loader() {
         return in_array( $v, array( 0, 1, 2 ), true ) ? $v : 2;
     }
 
+    public function sanitize_soc2_endpoint( $val ) {
+        $raw_value = trim( (string) $val );
+        $default   = defined( 'VL_LAS_SOC2_ENDPOINT_DEFAULT' )
+            ? VL_LAS_SOC2_ENDPOINT_DEFAULT
+            : 'https://hub.visiblelight.ai/api/soc2/snapshot';
+        $previous  = get_option( 'vl_las_soc2_endpoint', $default );
+
+        if ( '' === $raw_value ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_empty',
+                __( 'Provide the SOC 2 snapshot endpoint assigned to your organization by Visible Light.', 'vl-las' )
+            );
+            return $previous;
+        }
+
+        $url = esc_url_raw( $raw_value );
+        if ( '' === $url ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_invalid',
+                __( 'Enter a valid HTTPS URL for the VL Hub SOC 2 endpoint.', 'vl-las' )
+            );
+            return $previous;
+        }
+
+        $parts = wp_parse_url( $url );
+        if ( ! $parts || empty( $parts['scheme'] ) || empty( $parts['host'] ) ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_parts',
+                __( 'The SOC 2 endpoint must include a hostname and path.', 'vl-las' )
+            );
+            return $previous;
+        }
+
+        if ( 'https' !== strtolower( $parts['scheme'] ) ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_scheme',
+                __( 'The SOC 2 endpoint must use HTTPS.', 'vl-las' )
+            );
+            return $previous;
+        }
+
+        if ( empty( $parts['path'] ) || false === strpos( $parts['path'], '/soc2' ) ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_path',
+                __( 'The SOC 2 endpoint should point to the /api/soc2/snapshot service provided by Visible Light.', 'vl-las' )
+            );
+            return $previous;
+        }
+
+        $headers = array( 'Accept' => 'application/json' );
+        $license = trim( (string) get_option( 'vl_las_license_code', '' ) );
+        if ( '' !== $license ) {
+            $headers['X-VL-License'] = $license;
+        }
+
+        $response = wp_remote_get( $url, array(
+            'timeout'     => 10,
+            'redirection' => 3,
+            'headers'     => $headers,
+        ) );
+
+        if ( is_wp_error( $response ) ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_unreachable',
+                sprintf(
+                    /* translators: %s: WordPress HTTP error message. */
+                    __( 'Could not connect to the VL Hub endpoint: %s', 'vl-las' ),
+                    $response->get_error_message()
+                )
+            );
+            return $previous;
+        }
+
+        $code       = (int) wp_remote_retrieve_response_code( $response );
+        $valid_codes = apply_filters(
+            'vl_las_soc2_endpoint_valid_codes',
+            array( 200, 201, 202, 203, 204, 206, 401, 403 )
+        );
+
+        if ( ! in_array( $code, $valid_codes, true ) ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_http',
+                sprintf(
+                    /* translators: %d: HTTP status code */
+                    __( 'Unexpected response from the VL Hub endpoint (HTTP %d).', 'vl-las' ),
+                    $code
+                )
+            );
+            return $previous;
+        }
+
+        if ( $code >= 400 ) {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_auth',
+                sprintf(
+                    /* translators: %d: HTTP status code */
+                    __( 'Endpoint reachable (HTTP %d). Confirm your Corporate License Code with Visible Light.', 'vl-las' ),
+                    $code
+                ),
+                'updated'
+            );
+        } else {
+            add_settings_error(
+                'vl_las_soc2_endpoint',
+                'vl_las_soc2_endpoint_ok',
+                __( 'Connection to the VL Hub SOC 2 endpoint succeeded.', 'vl-las' ),
+                'updated'
+            );
+        }
+
+        return $url;
+    }
+
     // ----------------------------
     // Field renderers
     // ----------------------------
@@ -894,6 +1015,32 @@ public function print_fallback_loader() {
             esc_attr( $val ),
             isset( $args['placeholder'] ) ? esc_attr( $args['placeholder'] ) : ''
         );
+    }
+
+    public function soc2_endpoint_field() {
+        $default = defined( 'VL_LAS_SOC2_ENDPOINT_DEFAULT' )
+            ? VL_LAS_SOC2_ENDPOINT_DEFAULT
+            : 'https://hub.visiblelight.ai/api/soc2/snapshot';
+        $value = get_option( 'vl_las_soc2_endpoint', $default );
+
+        printf(
+            '<input type="url" name="vl_las_soc2_endpoint" value="%1$s" class="regular-text code" placeholder="%2$s" pattern="https://.*" />',
+            esc_attr( $value ),
+            esc_attr( $default )
+        );
+
+        echo '<p class="description">' . esc_html__( 'Provide the tenant-specific SOC 2 snapshot URL issued by Visible Light. The plugin expects a secure endpoint hosted on the VL Hub.', 'vl-las' ) . '</p>';
+        printf(
+            '<p class="description">%s</p>',
+            wp_kses_post(
+                sprintf(
+                    /* translators: %s: example SOC 2 endpoint URL */
+                    __( 'Example endpoint: %s (replace the tenant token with the value Visible Light provides).', 'vl-las' ),
+                    '<code>https://hub.visiblelight.ai/api/soc2/snapshot?tenant=your-company-slug</code>'
+                )
+            )
+        );
+        echo '<p class="description">' . esc_html__( 'Saving this field pings the VL Hub immediately to validate the connection.', 'vl-las' ) . '</p>';
     }
 
     public function textarea_field( $args ) {
